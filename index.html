@@ -3,7 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <title>Departamento / Municipio / Comuna</title>
-<script type="text/javascript" src="https://js.jotform.com/JFCustomWidget.min.js"></script>
 <style>
   :root{
     --border:#d7dbe2;
@@ -18,6 +17,7 @@
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     color:var(--text);
     background:transparent;
+    min-height:230px; /* espacio reservado para los 3 campos */
   }
   .wrap{
     display:flex;
@@ -108,6 +108,10 @@ const DIVIPOLE_DATA = {"AMAZONAS": {"EL ENCANTO": [], "LA CHORRERA": [], "LA PED
   var comunaHint   = document.getElementById('comunaHint');
 
   var DATA = (typeof DIVIPOLE_DATA !== 'undefined') ? DIVIPOLE_DATA : {};
+  var SEP = ' / ';               // separador del valor enviado: Departamento / Municipio / Comuna
+  var MIN_FRAME_HEIGHT = 230;    // alto mínimo: Departamento + Municipio + Comuna
+
+  /* ---------- Utilidades de los selects ---------- */
 
   function clearSelect(sel, placeholder) {
     sel.innerHTML = '';
@@ -131,42 +135,12 @@ const DIVIPOLE_DATA = {"AMAZONAS": {"EL ENCANTO": [], "LA CHORRERA": [], "LA PED
     fillOptions(depSelect, Object.keys(DATA).sort());
   }
 
-  function onDepartamentoChange() {
-    var dep = depSelect.value;
-
+  function fillMunicipios(dep) {
     clearSelect(muniSelect, dep ? 'Seleccione un municipio…' : 'Seleccione primero un departamento');
     muniSelect.disabled = !dep;
-
-    resetComuna();
-
     if (dep && DATA[dep]) {
       fillOptions(muniSelect, Object.keys(DATA[dep]).sort());
     }
-    sendValue();
-    resizeFrame();
-  }
-
-  function onMunicipioChange() {
-    var dep = depSelect.value;
-    var muni = muniSelect.value;
-    resetComuna();
-
-    if (dep && muni && DATA[dep] && DATA[dep][muni] && DATA[dep][muni].length > 0) {
-      var comunas = DATA[dep][muni];
-      clearSelect(comunaSelect, 'Seleccione una comuna…');
-      fillOptions(comunaSelect, comunas);
-      comunaSelect.disabled = false;
-      comunaField.classList.remove('is-hidden');
-      comunaHint.textContent = '';
-    } else if (dep && muni) {
-      // Municipio sin comunas registradas en la base (municipio no dividido en comunas)
-      comunaField.classList.remove('is-hidden');
-      comunaSelect.disabled = true;
-      clearSelect(comunaSelect, 'No aplica para este municipio');
-      comunaHint.textContent = 'Este municipio no tiene comunas registradas.';
-    }
-    sendValue();
-    resizeFrame();
   }
 
   function resetComuna() {
@@ -176,9 +150,24 @@ const DIVIPOLE_DATA = {"AMAZONAS": {"EL ENCANTO": [], "LA CHORRERA": [], "LA PED
     comunaHint.textContent = '';
   }
 
-  function onComunaChange() {
-    sendValue();
+  function fillComunas(dep, muni) {
+    resetComuna();
+    if (!(dep && muni)) { return; }
+    var comunas = (DATA[dep] && DATA[dep][muni]) || [];
+    comunaField.classList.remove('is-hidden');
+    if (comunas.length > 0) {
+      clearSelect(comunaSelect, 'Seleccione una comuna…');
+      fillOptions(comunaSelect, comunas);
+      comunaSelect.disabled = false;
+    } else {
+      // Municipio sin comunas registradas en la base (no dividido en comunas)
+      comunaSelect.disabled = true;
+      clearSelect(comunaSelect, 'No aplica para este municipio');
+      comunaHint.textContent = 'Este municipio no tiene comunas registradas.';
+    }
   }
+
+  /* ---------- Valor que se envía a JotForm ---------- */
 
   function currentValue() {
     return {
@@ -188,46 +177,143 @@ const DIVIPOLE_DATA = {"AMAZONAS": {"EL ENCANTO": [], "LA CHORRERA": [], "LA PED
     };
   }
 
-  function sendValue() {
+  // JotForm espera SIEMPRE un string en "value".
+  function currentText() {
     var v = currentValue();
-    var parts = [v.departamento, v.municipio, v.comuna].filter(function (p) { return p; });
-    var displayValue = parts.join(' / ');
+    return [v.departamento, v.municipio, v.comuna]
+      .filter(function (p) { return p; })
+      .join(SEP);
+  }
 
+  // Obligatorio (si el campo es requerido en el formulario): Departamento + Municipio
+  function isValid() {
+    var v = currentValue();
+    return !!(v.departamento && v.municipio);
+  }
+
+  // Actualiza el valor del campo en el formulario cada vez que el usuario elige algo.
+  function sendValue() {
     if (window.JFCustomWidget) {
       JFCustomWidget.sendData({
-        value: displayValue,
-        valid: !!(v.departamento && v.municipio)
+        valid: isValid(),
+        value: currentText()
       });
     }
   }
 
+  // Restaura la selección cuando el formulario se abre con un valor ya guardado
+  // (por ejemplo, al editar un envío).
+  function restoreValue(text) {
+    if (!text || typeof text !== 'string') { return; }
+    var p = text.split(SEP);
+    var dep = p[0], muni = p[1], com = p[2];
+    if (!dep || !DATA[dep]) { return; }
+    depSelect.value = dep;
+    fillMunicipios(dep);
+    resetComuna();
+    if (muni && DATA[dep][muni]) {
+      muniSelect.value = muni;
+      fillComunas(dep, muni);
+      if (com && !comunaSelect.disabled) { comunaSelect.value = com; }
+    }
+  }
+
+  /* ---------- Redimensionado del iframe ---------- */
+
   function resizeFrame() {
     if (window.JFCustomWidget) {
-      var h = document.body.scrollHeight + 20;
+      var h = Math.max(document.body.scrollHeight + 20, MIN_FRAME_HEIGHT);
       JFCustomWidget.requestFrameResize({ height: h });
     }
   }
 
-  depSelect.addEventListener('change', onDepartamentoChange);
-  muniSelect.addEventListener('change', onMunicipioChange);
-  comunaSelect.addEventListener('change', onComunaChange);
+  function resizeFrameSoon() {
+    resizeFrame();
+    setTimeout(resizeFrame, 50);
+    setTimeout(resizeFrame, 250);
+  }
+
+  /* ---------- Eventos de la interfaz ---------- */
+
+  depSelect.addEventListener('change', function () {
+    fillMunicipios(depSelect.value);
+    resetComuna();
+    sendValue();
+    resizeFrameSoon();
+  });
+
+  muniSelect.addEventListener('change', function () {
+    fillComunas(depSelect.value, muniSelect.value);
+    sendValue();
+    resizeFrameSoon();
+  });
+
+  comunaSelect.addEventListener('change', sendValue);
 
   populateDepartamentos();
 
-  if (window.JFCustomWidget) {
-    JFCustomWidget.subscribe('ready', function () {
-      resizeFrame();
+  if (window.MutationObserver) {
+    new MutationObserver(resizeFrameSoon).observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class']
+    });
+  }
+  resizeFrameSoon();
+
+  /* ---------- Integración con JotForm ----------
+     La interfaz de arriba funciona siempre. Esta parte conecta el widget con el
+     formulario cuando el SDK (JotFormCustomWidget.min.js) termina de cargar. */
+
+  var connected = false;
+
+  function connectJotform() {
+    if (connected || !window.JFCustomWidget) { return; }
+    connected = true;
+
+    // "ready": el formulario y el iframe del campo ya cargaron; data.value trae
+    // el valor guardado (si se está editando un envío).
+    JFCustomWidget.subscribe('ready', function (data) {
+      restoreValue(data && data.value);
+      resizeFrameSoon();
       sendValue();
     });
-    // Restaurar un valor previamente guardado (por ejemplo al editar una respuesta)
+
+    // "submit": se envía el formulario. JotForm lee resultado.valid (booleano) y
+    // resultado.value (string) -- los nombres de la API son en inglés.
     JFCustomWidget.subscribe('submit', function () {
-      sendValue();
-      JFCustomWidget.sendSubmit({ valid: true, value: currentValue() });
+      var resultado = {};
+      resultado.valid = isValid();
+      resultado.value = currentText();
+      JFCustomWidget.sendSubmit(resultado);
     });
   }
 
-  resizeFrame();
+  // Llamado por el loader asíncrono (?onload=onLoadCallback) al terminar de cargar el SDK.
+  window.onLoadCallback = connectJotform;
+
+  // Red de seguridad: si el SDK ya estaba cargado, o el callback no se disparó,
+  // reintenta unos segundos hasta encontrar JFCustomWidget.
+  var tries = 0;
+  var poll = setInterval(function () {
+    tries++;
+    if (window.JFCustomWidget) { connectJotform(); }
+    if (connected || tries > 50) { clearInterval(poll); }
+  }, 200);
 })();
+</script>
+
+<script type="text/javascript">
+  // Carga asíncrona del SDK de widgets personalizados de JotForm (ver tutorial).
+  (function () {
+    var po = document.createElement('script');
+    po.type = 'text/javascript';
+    po.async = true;
+    po.src = '//js.jotform.com/JotFormCustomWidget.min.js?onload=onLoadCallback';
+    var s = document.getElementsByTagName('script')[0];
+    s.parentNode.insertBefore(po, s);
+  })();
 </script>
 
 </body>
