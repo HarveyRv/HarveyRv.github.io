@@ -20,6 +20,7 @@
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     color:var(--text);
     background:transparent;
+    min-height:230px;
   }
   .wrap{
     display:flex;
@@ -116,10 +117,10 @@ const DIVIPOLE_DATA = {"AMAZONAS": {"EL ENCANTO": [], "LA CHORRERA": [], "LA PED
   var MIN_FRAME_HEIGHT = 230;    // Alto reservado para los 3 campos (evita saltos del formulario)
   var CLEAN_COMUNA_LABELS = true; // Muestra "COMUNA 1 ..." en vez de "01COMUNA 1 ...". El VALOR enviado no cambia.
 
-  // Parámetro opcional del widget (se define en el registro del widget en Jotform):
-  //   RequireComuna = Si | No   → si es "Si", el campo solo es válido cuando se elige comuna
-  //                               en los municipios que tienen comunas registradas.
-  var requireComuna = false;
+  var DEBUG = /[?&]debug=1/.test(location.search);
+  function log() {
+    if (DEBUG && window.console) { console.log.apply(console, ['[widget-divipole]'].concat([].slice.call(arguments))); }
+  }
 
   /* ================= Referencias y datos ================= */
 
@@ -227,7 +228,6 @@ const DIVIPOLE_DATA = {"AMAZONAS": {"EL ENCANTO": [], "LA CHORRERA": [], "LA PED
   function isValid() {
     var v = currentValue();
     if (!(v.departamento && v.municipio)) { return false; }
-    if (requireComuna && comunasOf(v.departamento, v.municipio).length > 0 && !v.comuna) { return false; }
     return true;
   }
 
@@ -236,10 +236,6 @@ const DIVIPOLE_DATA = {"AMAZONAS": {"EL ENCANTO": [], "LA CHORRERA": [], "LA PED
     var v = currentValue();
     if (!v.departamento) { depSelect.setAttribute('aria-invalid', 'true'); }
     if (v.departamento && !v.municipio) { muniSelect.setAttribute('aria-invalid', 'true'); }
-    if (v.departamento && v.municipio && requireComuna &&
-        comunasOf(v.departamento, v.municipio).length > 0 && !v.comuna) {
-      comunaSelect.setAttribute('aria-invalid', 'true');
-    }
   }
 
   function updateDebug() {
@@ -253,7 +249,8 @@ const DIVIPOLE_DATA = {"AMAZONAS": {"EL ENCANTO": [], "LA CHORRERA": [], "LA PED
     updateDebug();
     if (window.JFCustomWidget) {
       try {
-        JFCustomWidget.sendData({ valid: isValid(), value: currentText() });
+        log('sendData', currentText());
+        JFCustomWidget.sendData({ value: currentText() });
       } catch (e) { /* el SDK aún no está listo */ }
     }
   }
@@ -281,13 +278,20 @@ const DIVIPOLE_DATA = {"AMAZONAS": {"EL ENCANTO": [], "LA CHORRERA": [], "LA PED
   function resizeFrame() {
     if (!window.JFCustomWidget) { return; }
     var h = Math.max(Math.ceil(wrap.getBoundingClientRect().height) + 12, MIN_FRAME_HEIGHT);
-    if (h === lastHeight) { return; }          // evita llamadas repetidas
     lastHeight = h;
     try { JFCustomWidget.requestFrameResize({ height: h }); } catch (e) {}
   }
 
-  if (window.ResizeObserver) {
-    new ResizeObserver(resizeFrame).observe(wrap);
+  function resizeFrameSoon() {
+    resizeFrame();
+    setTimeout(resizeFrame, 50);
+    setTimeout(resizeFrame, 250);
+  }
+  if (window.ResizeObserver) { new ResizeObserver(resizeFrame).observe(wrap); }
+  if (window.MutationObserver) {
+    new MutationObserver(resizeFrameSoon).observe(document.body, {
+      childList: true, subtree: true, attributes: true, attributeFilter: ['class']
+    });
   }
 
   /* ================= Eventos de la interfaz ================= */
@@ -297,14 +301,14 @@ const DIVIPOLE_DATA = {"AMAZONAS": {"EL ENCANTO": [], "LA CHORRERA": [], "LA PED
     fillMunicipios(depSelect.value);
     resetComuna();
     sendValue();
-    resizeFrame();
+    resizeFrameSoon();
   });
 
   muniSelect.addEventListener('change', function () {
     clearInvalid();
     fillComunas(depSelect.value, muniSelect.value);
     sendValue();
-    resizeFrame();
+    resizeFrameSoon();
   });
 
   comunaSelect.addEventListener('change', function () {
@@ -321,29 +325,26 @@ const DIVIPOLE_DATA = {"AMAZONAS": {"EL ENCANTO": [], "LA CHORRERA": [], "LA PED
 
   var connected = false;
 
-  function parseYes(v) {
-    return /^(si|sí|yes|true|1)$/i.test(String(v == null ? '' : v).trim());
-  }
-
   function connectJotform() {
     if (connected || !window.JFCustomWidget) { return; }
     connected = true;
+    log('SDK listo');
 
     JFCustomWidget.subscribe('ready', function (data) {
-      // Parámetro opcional definido al registrar el widget
-      try { requireComuna = parseYes(JFCustomWidget.getWidgetSetting('RequireComuna')); } catch (e) {}
-
+      log('ready', data);
       restoreValue(data && data.value);
       lastHeight = 0;
-      resizeFrame();
+      resizeFrameSoon();
       sendValue();
+    });
 
-      // Al enviar el formulario (o pulsar "Siguiente" en formularios de varias páginas)
-      JFCustomWidget.subscribe('submit', function () {
-        var ok = isValid();
-        if (!ok) { markErrors(); }
-        JFCustomWidget.sendSubmit({ valid: ok, value: currentText() });
-      });
+    // Al enviar el formulario (o pulsar "Siguiente" en formularios de varias páginas).
+    // valid=true si hay Departamento + Municipio; el valor se recalcula del DOM en ese instante.
+    JFCustomWidget.subscribe('submit', function () {
+      var resultado = { valid: isValid(), value: currentText() };
+      log('submit', resultado);
+      if (!resultado.valid) { markErrors(); }
+      JFCustomWidget.sendSubmit(resultado);
     });
   }
 
