@@ -249,8 +249,9 @@ const DIVIPOLE_DATA = {"AMAZONAS": {"EL ENCANTO": [], "LA CHORRERA": [], "LA PED
     updateDebug();
     if (window.JFCustomWidget) {
       try {
-        log('sendData', currentText());
-        JFCustomWidget.sendData({ value: currentText() });
+        log('sendData', currentText(), isValid());
+        // 'valid' es necesario: Jotform lo usa para validar el campo cuando es obligatorio.
+        JFCustomWidget.sendData({ valid: isValid(), value: currentText() });
       } catch (e) { /* el SDK aún no está listo */ }
     }
   }
